@@ -1,0 +1,108 @@
+#!/usr/bin/ruby
+# one-liner
+# (((c=print('extension: ')||Dir[File.dirname(__FILE__)+'/**/*.'+gets.chomp[/\.?\K.+/]].map{|t|File.open(t){|f|[File.expand_path(f),f.each_line.count]}}).sort_by!{|_,j|j})<<['total',c.map{|_,j|j}.sum]).each{|i,j|puts"#{i.rjust(mw||=c.map{|i,_|i.size}.max)} : #{j}"}
+
+
+# usage:
+#   countlines -h
+#   countlines [options] file
+#   countlines -r[options] <extensions> directory
+
+def fatal_warning text
+  warn 'error: ' + text
+  exit 1
+end
+
+Options = {
+  t: false, # only print total
+  T: false, # don't print total
+  n: false, # sort by name
+  r: false, # recursive search
+  f: false, # print just file names
+  p: false, # print full paths
+}
+
+def count_in_file file_path
+  File.open file_path do |file|
+    lines = file.each_line.count
+  end
+end
+
+usage_string = 'usage: countlines [options] path <extensions>'
+help_string = <<END
+  -t only print the total  (incompatible with -T)
+  -T don't print the total (incompatible with -t)
+  -n sort by name          (incompatible with a file)
+  -r recursive search      (incompatible with a file)
+  -f only print file names
+  -p print full paths
+END
+
+if ARGV.empty?
+  puts usage_string
+  exit
+end
+
+if ARGV == ['-h']
+  puts usage_string
+  puts help_string
+  exit
+end
+
+argv = ARGV.chunk {|i| i.start_with? '-'}
+args = argv.take_while {|i| i.first} .map(&:last).join.delete('-').chars.uniq
+
+args.each do |arg|
+  Options[arg.to_sym] = true;
+end
+
+path = ARGV.find {|i| not i.start_with? '-'}
+fatal_warning 'no path given' unless path
+extensions = ARGV[ARGV.index(path)+1..-1].take_while {|i| not i.start_with? '-'}
+
+extensions = ['*'] if extensions.empty? or extensions.include?('*')
+
+# fatal_warning 'options after arguments' if ARGV[ARGV.index(extensions.first)]
+
+path = `pwd`.chomp if path == '.'
+
+# puts "args: #{args}"
+# puts "path: #{path}"
+
+fatal_warning 'no extension given' if extensions.empty? # change to all extensions (option?)
+exts = extensions.map {|e| '.' + e[/(?<=^\.|^)\w+|\*$/]}
+fatal_warning 'invalid extension' if exts.size != extensions.size
+fatal_warning 'invalid options' unless args.all? {|i| Options.keys.include? i.to_sym}
+fatal_warning 'invalid options t with T' if Options[:t] and Options[:T]
+fatal_warning 'invalid options f with p' if Options[:f] and Options[:p]
+fatal_warning 'invalid options with file' if File.file?(path) and [:n,:r].any? {|i| Options[i]}
+fatal_warning 'invalid path' unless File.exist? path
+
+if File.file? path
+  dirs = Dir[path]
+else
+  dirs = exts.flat_map {|e| Dir[path + (Options[:r] ? '/**/*' : '/*' ) + e]}
+end
+
+lines = dirs.zip dirs.map {|d| count_in_file d if File.file? d}
+
+lines.map! {|n, l| [n[/(?<=\/)[^\/]+$/], l]} if Options[:f] or File.file? path
+lines.map! {|n, l| [n.reverse.chomp(path.reverse).reverse, l]} unless Options[:p]
+
+unless Options[:t]
+  if Options[:n]
+    lines.sort_by! &:first
+  else
+    lines.sort_by! &:last
+  end
+end
+
+lines << ['total', lines.map(&:last).inject(:+)] unless Options[:T]
+
+lines = [lines.last] if Options[:t]
+
+align = lines.map(&:first).map(&:size).max + 2
+
+lines.each do |d, l|
+  puts "#{(d + ':').ljust align} #{l} lines"
+end
